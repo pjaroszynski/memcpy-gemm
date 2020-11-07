@@ -60,6 +60,7 @@ http_archive(
     name = "half",
     build_file = "//third_party:half.BUILD",
     urls = [
+      "https://phoenixnap.dl.sourceforge.net/project/half/half/1.12.0/half-1.12.0.zip",
       "https://ayera.dl.sourceforge.net/project/half/half/1.12.0/half-1.12.0.zip",
     ],
     sha256 = "cdd70d3bf3fe091b688e7ab3f48471c881a197d2c186c95cca8bf156961fb41c",
