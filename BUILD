@@ -64,6 +64,7 @@ cc_library(
     deps = [
         ":gemm_test_lib",
         ":multi_gemm_lib",
+        ":cuda_compute_copy",
         "@absl//absl/memory",
         "@absl//absl/strings",
         "@absl//absl/strings:str_format",
@@ -74,6 +75,19 @@ cc_library(
         "@glog",
         "@libnuma//:numa",
     ],
+)
+
+# TODO: Build the cuda source through bazel.
+#
+# Currently src/cuda_compute_copy.cu is included in git and needs to be
+# locally built with something like this:
+#  $ nvcc -arch sm_80 src/cuda_compute_copy.cu -o src/cuda_compute_copy.a -lib -O3
+#
+# And then this cc_import() picks it up
+cc_import(
+    name = "cuda_compute_copy",
+    static_library = "src/cuda_compute_copy.a",
+    alwayslink = 1,
 )
 
 cc_binary(

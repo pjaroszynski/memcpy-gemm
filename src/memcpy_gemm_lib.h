@@ -135,12 +135,13 @@ class CopySingleFlow : public CopyThread {
  public:
   CopySingleFlow(Flow *flow, const PulseBarrier *pulse_barrier, int wait_ns,
                  int batch_size, bool use_cudaMemcpyPeerAsync,
-                 bool use_cudaMemcpyDefault)
+                 bool use_cudaMemcpyDefault, bool use_cudaComputeCopy)
       : flow_(flow),
         wait_ns_(wait_ns),
         batch_size_(batch_size),
         use_cudaMemcpyPeerAsync_(use_cudaMemcpyPeerAsync),
         use_cudaMemcpyDefault_(use_cudaMemcpyDefault),
+        use_cudaComputeCopy_(use_cudaComputeCopy),
         pulse_barrier_(pulse_barrier) {}
 
  protected:
@@ -154,6 +155,7 @@ class CopySingleFlow : public CopyThread {
   int batch_size_;
   bool use_cudaMemcpyPeerAsync_;
   bool use_cudaMemcpyDefault_;
+  bool use_cudaComputeCopy_;
   const PulseBarrier *pulse_barrier_;
 };
 
@@ -162,10 +164,12 @@ class CopySingleFlow : public CopyThread {
 class EventPollThread : public CopyThread {
  public:
   EventPollThread(std::vector<Flow *> flows, bool use_cudaMemcpyPeerAsync,
-                  bool use_cudaMemcpyDefault)
+                  bool use_cudaMemcpyDefault, bool use_cudaComputeCopy)
       : flows_(std::move(flows)),
         use_cudaMemcpyPeerAsync_(use_cudaMemcpyPeerAsync),
-        use_cudaMemcpyDefault_(use_cudaMemcpyDefault) {}
+        use_cudaMemcpyDefault_(use_cudaMemcpyDefault),
+        use_cudaComputeCopy_(use_cudaComputeCopy)
+        {}
 
  protected:
   void Run() override;
@@ -174,6 +178,7 @@ class EventPollThread : public CopyThread {
   const std::vector<Flow *> flows_;
   const bool use_cudaMemcpyPeerAsync_;
   const bool use_cudaMemcpyDefault_;
+  const bool use_cudaComputeCopy_;
 };
 
 // Each GPU and its associated in/out flows is managed by one thread.
@@ -182,11 +187,12 @@ class PerGpuThread : public CopyThread {
  public:
   PerGpuThread(absl::string_view name_prefix, std::vector<Flow *> flows,
                bool group_by_dest, bool use_cudaMemcpyPeerAsync,
-               bool use_cudaMemcpyDefault)
+               bool use_cudaMemcpyDefault, bool use_cudaComputeCopy)
       : flows_(std::move(flows)),
         group_by_dest_(group_by_dest),
         use_cudaMemcpyPeerAsync_(use_cudaMemcpyPeerAsync),
         use_cudaMemcpyDefault_(use_cudaMemcpyDefault),
+        use_cudaComputeCopy_(use_cudaComputeCopy),
         name_prefix_(name_prefix) {}
 
   std::string NamePrefix() { return name_prefix_; }
@@ -199,6 +205,7 @@ class PerGpuThread : public CopyThread {
   const bool group_by_dest_;
   const bool use_cudaMemcpyPeerAsync_;
   const bool use_cudaMemcpyDefault_;
+  const bool use_cudaComputeCopy_;
   const std::string name_prefix_;
 };
 

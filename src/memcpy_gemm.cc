@@ -67,6 +67,10 @@ ABSL_FLAG(bool, use_cudaMemcpyPeerAsync, false,
           "use cudaMemcpyPeerAsync instead of cudaMemcpyAsync.");
 ABSL_FLAG(bool, use_cudaMemcpyDefault, true,
           "Use cudaMemcpyDefault and no other cudaMemcpyKind.");
+ABSL_FLAG(bool, use_cudaComputeCopy, false,
+          "Use SMs for copying data. "
+          "Notably this pulls the data instead of pushing it, "
+          "i.e. the copy kernel runs on the destination.");
 ABSL_FLAG(std::string, flow_model, "thread-per-flow",
           "Choices:  thread-per-flow, event-poll, thread-per-gpu.");
 ABSL_FLAG(int32_t, wait_ns, 0,
@@ -241,6 +245,8 @@ int main(int argc, char **argv) {
       absl::StrSplit(absl::GetFlag(FLAGS_flows), ' ', absl::SkipEmpty());
   std::vector<pgmg::Flow *> flows;
 
+  const bool use_cudaComputeCopy = absl::GetFlag(FLAGS_use_cudaComputeCopy);
+
   for (const auto &f : flow_strings) {
     pgmg::DeviceSpec from_dev, to_dev;
     int from_index, to_index, counter_index;
@@ -249,7 +255,15 @@ int main(int argc, char **argv) {
               &counter_index);
     dev_logger.Log(from_dev);
     dev_logger.Log(to_dev);
-    peering_pal.Peer(from_dev, to_dev);
+
+    if (use_cudaComputeCopy) {
+        // For compute copies, pulling gives better results at least on HGX 8
+        // A100, so swap the device order.
+        peering_pal.Peer(to_dev, from_dev);
+    } else {
+        peering_pal.Peer(from_dev, to_dev);
+    }
+
     for (int i = 0; i < replicas; ++i) {
       char *from_buf = pool.GetBuffer(from_dev, from_index);
       char *to_buf = pool.GetBuffer(to_dev, to_index);
@@ -363,11 +377,11 @@ int main(int argc, char **argv) {
     for (int i = 0; i < flows.size(); ++i) {
       threads.emplace_back(new pgmg::CopySingleFlow(
           flows[i], &pulse_barrier, absl::GetFlag(FLAGS_wait_ns), batch_size,
-          use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault));
+          use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault, use_cudaComputeCopy));
     }
   } else if (flow_model == "event-poll") {
     threads.emplace_back(new pgmg::EventPollThread(
-        flows, use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault));
+        flows, use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault, use_cudaComputeCopy));
   } else if (flow_model == "thread-per-gpu") {
     absl::flat_hash_set<pgmg::DeviceSpec> gpu_flows;
     for (auto f : flows) {
@@ -377,7 +391,7 @@ int main(int argc, char **argv) {
         threads.emplace_back(new pgmg::PerGpuThread(
             "per_gpu_thread_" + DeviceSpecToString(d),
             std::vector<pgmg::Flow *>{f}, absl::GetFlag(FLAGS_group_by_dest),
-            use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault));
+            use_cudaMemcpyPeerAsync, use_cudaMemcpyDefault, use_cudaComputeCopy));
       }
     }
   }

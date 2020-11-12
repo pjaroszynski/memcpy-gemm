@@ -80,9 +80,17 @@ char *BufferPool::GetBuffer(DeviceSpec dev, int buffer_index) {
   return mem;
 }
 
+extern "C" {
+    void ComputeCopy(cudaStream_t stream, void *dst_v, void *src_v, size_t size);
+}
+
 static void MemcpyConfusino(Flow *f, bool use_cudaMemcpyPeerAsync,
-                            bool use_cudaMemcpyDefault) {
-  if (use_cudaMemcpyPeerAsync && f->to_dev_.first == GPU &&
+                            bool use_cudaMemcpyDefault, bool use_cudaComputeCopy) {
+
+  if (use_cudaComputeCopy && f->from_dev_.first == GPU && f->to_dev_.first == GPU) {
+      ComputeCopy(f->stream_, f->to_mem_, f->from_mem_, f->buf_size_);
+  }
+  else if (use_cudaMemcpyPeerAsync && f->to_dev_.first == GPU &&
       f->from_dev_.first == GPU) {
     CUDA_CHECK(cudaMemcpyPeerAsync(f->to_mem_, f->to_dev_.second, f->from_mem_,
                                    f->from_dev_.second, f->buf_size_,
@@ -119,7 +127,11 @@ void CopyThread::Join() {
 
 void CopySingleFlow::Run() {
   const int want_device = [this] {
-    if (flow_->from_dev_.first == GPU) {
+    if (use_cudaComputeCopy_ && flow_->to_dev_.first == GPU && flow_->from_dev_.first == GPU) {
+      // Prefer pulling for SM copies as they are faster at least on HGX 8 A100
+      return flow_->to_dev_.second;
+    }
+    else if (flow_->from_dev_.first == GPU) {
       return flow_->from_dev_.second;
     } else if (flow_->to_dev_.first == GPU) {
       return flow_->to_dev_.second;
@@ -138,7 +150,7 @@ void CopySingleFlow::Run() {
   // Send off initial batches.
   for (int i = 0; i < batch_size_; i++) {
     cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming);
-    MemcpyConfusino(flow_, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_);
+    MemcpyConfusino(flow_, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_, use_cudaComputeCopy_);
     CUDA_CHECK(cudaEventRecord(events[i]));
   }
 
@@ -153,7 +165,7 @@ void CopySingleFlow::Run() {
         CUDA_CHECK(cudaEventSynchronize(events[i]));
         (*flow_->counter_)++;
         MemcpyConfusino(flow_, use_cudaMemcpyPeerAsync_,
-                        use_cudaMemcpyDefault_);
+                        use_cudaMemcpyDefault_, use_cudaComputeCopy_);
         CUDA_CHECK(cudaEventRecord(events[i], flow_->stream_));
       }
     } while (absl::Now() < deadline && !stop_copying_.HasBeenNotified());
@@ -171,7 +183,7 @@ void EventPollThread::Run() {
       CUDA_CHECK(cudaSetDevice(f->to_dev_.second));
     }
     CUDA_CHECK(cudaStreamCreate(&f->stream_));
-    MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_);
+    MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_, use_cudaComputeCopy_);
     CUDA_CHECK(cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming));
     CUDA_CHECK(cudaEventRecord(events[i], f->stream_));
   }
@@ -179,7 +191,7 @@ void EventPollThread::Run() {
   while (!stop_copying_.HasBeenNotified()) {
     if (cudaEventQuery(events[cur_event]) == cudaSuccess) {
       Flow *f = flows_[cur_event];
-      MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_);
+      MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_, use_cudaComputeCopy_);
       CUDA_CHECK(cudaEventRecord(events[cur_event], f->stream_));
       (*f->counter_)++;
     }
@@ -206,13 +218,13 @@ void PerGpuThread::Run() {
     f->stream_ = stream;
     LOG(INFO) << NamePrefix() << " copying " << DeviceSpecToString(f->from_dev_)
               << " to " << DeviceSpecToString(f->to_dev_);
-    MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_);
+    MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_, use_cudaComputeCopy_);
   }
   while (!stop_copying_.HasBeenNotified()) {
     CUDA_CHECK(cudaStreamSynchronize(stream))
     for (auto f : flows_) {
       (*f->counter_)++;
-      MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_);
+      MemcpyConfusino(f, use_cudaMemcpyPeerAsync_, use_cudaMemcpyDefault_, use_cudaComputeCopy_);
     }
   }
   CUDA_CHECK(cudaStreamDestroy(stream));
