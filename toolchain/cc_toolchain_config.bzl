@@ -91,7 +91,7 @@ def _impl(ctx):
         host_system_name = "unknown-linux-gnu",
         target_system_name = "unknown-linux-gnu",
         target_cpu = "k8",
-        cxx_builtin_include_directories = ["/usr/include", "/usr/include/linux"],
+        cxx_builtin_include_directories = ["/usr/include", "/usr/include/linux", "/usr/lib/gcc/x86_64-redhat-linux/9/include/"],
         target_libc = "unknown",
         compiler = "clang-static",
         abi_version = "unknown",
