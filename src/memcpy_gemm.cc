@@ -403,8 +403,10 @@ int main(int argc, char **argv) {
     std::cout << now;
     for (int i = 0; i < nr_counters; ++i) {
       std::cout << absl::StrFormat(
-          "\t%.3f", (sample[i] - last_sample[i]) * buffer_size * 1e-9 /
-                        absl::ToDoubleSeconds(now - last_time));
+          "\t%.3f (%.3f)",
+          (sample[i] - last_sample[i]) * buffer_size * 1e-9 / absl::ToDoubleSeconds(now - last_time),
+          (sample[i]) * buffer_size * 1e-9 / absl::ToDoubleSeconds(now - start_time)
+          );
     }
     std::cout << "\n";
     last_sample = sample;
